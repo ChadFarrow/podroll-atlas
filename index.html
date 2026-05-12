@@ -345,7 +345,11 @@ function buildFocusGraph(feedId) {
     x: 0, y: 0
   });
 
-  seen.set(feedId, makeNode(central, true));
+  const focal = makeNode(central, true);
+  // How many incoming recommenders are *not* represented as a node because
+  // the dataset only stores one example per recommended podcast.
+  focal.unknownIncoming = Math.max(0, (central.popularity || 0) - (central.sourceFeedId ? 1 : 0));
+  seen.set(feedId, focal);
 
   // Outgoing — sort by the recommended podcast's own popularity, take top N.
   const allOutgoing = (recommendsByFeed.get(feedId) || []).slice()
@@ -449,6 +453,10 @@ function draw() {
       ctx.stroke();
       drawArrow(s, t, mx + ox, my + oy, ctx.strokeStyle);
     }
+    // Pink "phantom" arrows for the recommenders we know exist by count
+    // but can't identify because the dataset only stores one example.
+    const focal = nodes.find(n => n.isFocal);
+    if (focal && focal.unknownIncoming > 0) drawPhantomIncoming(focal);
   } else {
     // Global view: batch all edges into a single path, one stroke().
     // Straight lines (cheap to compute), faint, viewport-culled.
@@ -568,6 +576,55 @@ function drawArrow(s, t, cx, cy, color) {
   ctx.fillStyle = color;
   ctx.fill();
   ctx.restore();
+}
+
+// Pink "phantom" arrows for incoming recommenders we know about by count
+// but not by identity (the dataset only stores one example per podcast).
+// Each phantom arrow starts off the visible viewport edge and points at the
+// focal node's perimeter, distributed evenly around the circle.
+function drawPhantomIncoming(focal) {
+  const count = Math.min(focal.unknownIncoming, 200); // hard visual cap
+  if (count <= 0) return;
+
+  // Start far enough out that the tail clearly exits the visible viewport
+  // at most reasonable zoom levels.
+  const startR = Math.max(W, H) / transform.k * 0.7 + 400;
+  const endR = focal.r + 6;
+  const lineColor = "rgba(244,114,182,0.35)";
+  const tipColor  = "rgba(244,114,182,0.7)";
+  const size = 7 / transform.k;
+  const offset = Math.PI / count + 0.12; // mild rotation so arrows don't align with cardinal directions
+
+  // Lines — one batched stroke for the lot.
+  ctx.lineWidth = 1.5 / transform.k;
+  ctx.strokeStyle = lineColor;
+  ctx.beginPath();
+  for (let i = 0; i < count; i++) {
+    const a = (i / count) * Math.PI * 2 + offset;
+    const cos = Math.cos(a), sin = Math.sin(a);
+    ctx.moveTo(focal.x + cos * startR, focal.y + sin * startR);
+    ctx.lineTo(focal.x + cos * endR,   focal.y + sin * endR);
+  }
+  ctx.stroke();
+
+  // Arrow tips at the inner end, each rotated to point toward focal.
+  ctx.fillStyle = tipColor;
+  for (let i = 0; i < count; i++) {
+    const a = (i / count) * Math.PI * 2 + offset;
+    const cos = Math.cos(a), sin = Math.sin(a);
+    const ex = focal.x + cos * endR;
+    const ey = focal.y + sin * endR;
+    ctx.save();
+    ctx.translate(ex, ey);
+    ctx.rotate(a + Math.PI); // point inward (toward focal)
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.lineTo(-size, size * 0.45);
+    ctx.lineTo(-size, -size * 0.45);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
 }
 
 // ----- Build & layout ---------------------------------------------------
