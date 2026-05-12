@@ -180,6 +180,8 @@
         <a href="https://podcastindex.org/datasets" target="_blank" rel="noopener" style="color:var(--accent-2); text-decoration:none">Data source</a>
         <span style="color:var(--muted); margin: 0 4px">·</span>
         <a href="https://github.com/albertobeta/podroll-atlas" target="_blank" rel="noopener" style="color:var(--accent-2); text-decoration:none">GitHub repo</a>
+        <span style="color:var(--muted); margin: 0 4px">·</span>
+        <span style="color:var(--muted)">By AB at <a href="https://rss.com" target="_blank" rel="noopener" style="color:var(--accent-2); text-decoration:none">RSS.com</a></span>
       </div>
     </div>
   </aside>
@@ -283,7 +285,8 @@ function hostColor(host) {
 // ----- State ------------------------------------------------------------
 let allData = [];
 let byFeedId = new Map();
-let recommendsByFeed = new Map();
+let recommendsByFeed = new Map();     // sourceFeedId -> [recommended rows]
+let recommendersByFeed = new Map();   // feedId -> [{feedId, url, host}] of all incoming recommenders
 let nodes = [], links = [], nodeById = new Map();
 let neighbors = new Map();
 let simulation = null;
@@ -297,11 +300,20 @@ let frameCount = 0, fpsLast = performance.now(), fps = 0;
 function buildIndexes(data) {
   byFeedId = new Map();
   recommendsByFeed = new Map();
+  recommendersByFeed = new Map();
   for (const d of data) {
     byFeedId.set(d.feedId, d);
     if (d.sourceFeedId) {
       if (!recommendsByFeed.has(d.sourceFeedId)) recommendsByFeed.set(d.sourceFeedId, []);
       recommendsByFeed.get(d.sourceFeedId).push(d);
+    }
+    // The dataset now ships a `sources` array with every recommender for this
+    // recommended podcast. Older cached payloads may only have the single
+    // `sourceFeedId` example, so we fall back to that if needed.
+    if (Array.isArray(d.sources) && d.sources.length) {
+      recommendersByFeed.set(d.feedId, d.sources);
+    } else if (d.sourceFeedId) {
+      recommendersByFeed.set(d.feedId, [{ feedId: d.sourceFeedId, url: d.sourceFeedUrl, host: d.recommenderHost }]);
     }
   }
 }
@@ -345,8 +357,25 @@ function buildGlobalGraph() {
 
 const FOCUS_MAX_NEIGHBORS = 200; // cap so aggregators (e.g. 6000-rec podrolls) don't kill the canvas
 
+// If a feed isn't in byFeedId (it's source-only), try to make a usable
+// record by merging anything we've already enriched from its RSS.
+function applyCachedEnrichment(record) {
+  const cached = enrichCache.get(record.feedId);
+  if (!cached) return record;
+  if (cached.title && (!record.title || record.title.startsWith("Feed #"))) record.title = cached.title;
+  if (cached.image && !record.image) record.image = cached.image;
+  return record;
+}
+
 function buildFocusGraph(feedId) {
-  const central = byFeedId.get(feedId) || { feedId, title: `Feed #${feedId}`, image: null, popularity: 0 };
+  // Make a shallow copy of the indexed row (if any) so we can safely patch
+  // it with cached enrichment without mutating the underlying dataset.
+  const indexed = byFeedId.get(feedId);
+  const central = applyCachedEnrichment(
+    indexed
+      ? { ...indexed }
+      : { feedId, title: `Feed #${feedId}`, image: null, popularity: 0 }
+  );
   const seen = new Map();
   const links = [];
 
@@ -364,9 +393,6 @@ function buildFocusGraph(feedId) {
   });
 
   const focal = makeNode(central, true);
-  // How many incoming recommenders are *not* represented as a node because
-  // the dataset only stores one example per recommended podcast.
-  focal.unknownIncoming = Math.max(0, (central.popularity || 0) - (central.sourceFeedId ? 1 : 0));
   seen.set(feedId, focal);
 
   // Outgoing — sort by the recommended podcast's own popularity, take top N.
@@ -377,15 +403,31 @@ function buildFocusGraph(feedId) {
     if (!seen.has(r.feedId)) seen.set(r.feedId, makeNode(r, false));
     links.push({ source: feedId, target: r.feedId, kind: "out" });
   }
-  if (central.sourceFeedId) {
-    const recSrc = byFeedId.get(central.sourceFeedId) || {
-      feedId: central.sourceFeedId, title: `Feed #${central.sourceFeedId}`,
-      image: null, popularity: 0, recommendedHost: central.recommenderHost
-    };
-    if (!seen.has(recSrc.feedId)) seen.set(recSrc.feedId, makeNode(recSrc, false));
-    links.push({ source: recSrc.feedId, target: feedId, kind: "in" });
+
+  // Incoming — use the full `sources` array (one node per recommender),
+  // capped at the same limit. Sort by the recommender's own popularity
+  // when we know it, so important recommenders surface first.
+  const allSources = (recommendersByFeed.get(feedId) || []).slice()
+    .sort((a, b) => (byFeedId.get(b.feedId)?.popularity || 0) - (byFeedId.get(a.feedId)?.popularity || 0));
+  const visibleSources = allSources.slice(0, FOCUS_MAX_NEIGHBORS);
+  for (const src of visibleSources) {
+    const indexed = byFeedId.get(src.feedId);
+    const srcData = applyCachedEnrichment(
+      indexed
+        ? { ...indexed }
+        : { feedId: src.feedId, title: `Feed #${src.feedId}`, image: null, popularity: 0, recommendedHost: src.host, url: src.url }
+    );
+    if (!seen.has(src.feedId)) seen.set(src.feedId, makeNode(srcData, false));
+    links.push({ source: src.feedId, target: feedId, kind: "in" });
   }
-  return { nodes: [...seen.values()], links, totalOutgoing: allOutgoing.length };
+
+  // Phantom arrow fallback: if for any reason we have fewer node-sources
+  // than the popularity count (e.g. older cached payload without the
+  // `sources` array), draw faded arrows from off-screen to represent the
+  // missing recommenders.
+  focal.unknownIncoming = Math.max(0, (central.popularity || 0) - visibleSources.length);
+
+  return { nodes: [...seen.values()], links, totalOutgoing: allOutgoing.length, totalIncoming: allSources.length };
 }
 
 // ----- Image cache (only used in focus mode) ----------------------------
@@ -827,25 +869,55 @@ function focusFeed(feedId) {
   document.getElementById("focus-banner").style.display = "block";
   document.getElementById("focus-title").textContent = d ? d.title : `Feed #${feedId}`;
   const totalOut = (recommendsByFeed.get(feedId) || []).length;
+  const totalIn = (recommendersByFeed.get(feedId) || []).length;
   const noteEl = document.getElementById("focus-note");
-  if (totalOut > FOCUS_MAX_NEIGHBORS) {
-    noteEl.textContent = `Showing top ${FOCUS_MAX_NEIGHBORS} of ${totalOut} (by popularity)`;
+  const notes = [];
+  if (totalOut > FOCUS_MAX_NEIGHBORS) notes.push(`outgoing capped: top ${FOCUS_MAX_NEIGHBORS} of ${totalOut}`);
+  if (totalIn > FOCUS_MAX_NEIGHBORS) notes.push(`incoming capped: top ${FOCUS_MAX_NEIGHBORS} of ${totalIn}`);
+  if (notes.length) {
+    noteEl.textContent = notes.join(" · ");
     noteEl.style.display = "block";
   } else {
     noteEl.style.display = "none";
   }
   render();
   showInfoByFeedId(feedId);
+  // Reflect the focused podcast in the URL fragment so it can be shared
+  // and deep-linked. replaceState avoids triggering a hashchange event.
+  if (parseHashFeedId() !== feedId) {
+    history.replaceState(null, "", `#${feedId}`);
+  }
+  // Kick off lazy RSS enrichment for the recommender nodes that the dataset
+  // only knows by feedId/url/host. Runs in the background; titles and covers
+  // pop in as each fetch completes.
+  enrichFocusNeighborhood(feedId).catch(e => console.warn("focus enrichment error:", e));
 }
 function exitFocus() {
   mode = "global";
   focusFeedId = null;
   document.getElementById("focus-banner").style.display = "none";
   hideInfo();
+  if (location.hash) {
+    history.replaceState(null, "", location.pathname + location.search);
+  }
   render();
 }
 document.getElementById("exit-focus-btn").addEventListener("click", exitFocus);
 document.addEventListener("keydown", e => { if (e.key === "Escape" && mode === "focus") exitFocus(); });
+
+// Deep linking — #feedId in the URL focuses that podcast.
+function parseHashFeedId() {
+  const m = location.hash.match(/^#(\d+)$/);
+  return m ? parseInt(m[1], 10) : null;
+}
+window.addEventListener("hashchange", () => {
+  const fid = parseHashFeedId();
+  if (fid === null) {
+    if (mode === "focus") exitFocus();
+  } else if (focusFeedId !== fid) {
+    focusFeed(fid);
+  }
+});
 
 // ----- Info panel --------------------------------------------------------
 function renderRecItem(r) {
@@ -859,6 +931,62 @@ function renderRecItem(r) {
 }
 
 const enrichCache = new Map();
+
+// In focus mode, sources from the dataset often only carry feedId/url/host
+// (no title or image). This worker pool fetches each source's RSS in the
+// background and patches the live graph + info panel as titles and covers
+// come in. Cached forever-per-session in enrichCache, so re-focusing on a
+// neighborhood is instant.
+const ENRICH_CONCURRENCY = 6;
+let enrichToken = 0;
+async function enrichFocusNeighborhood(feedId) {
+  const token = ++enrichToken;
+  const targets = [];
+  if (recommendersByFeed.has(feedId)) {
+    for (const s of recommendersByFeed.get(feedId).slice(0, FOCUS_MAX_NEIGHBORS)) {
+      if (!byFeedId.has(s.feedId) && s.url && !enrichCache.has(s.feedId)) targets.push(s);
+    }
+  }
+  // Outgoing rows already have title+image from the dataset, so no fetch needed there.
+  let cursor = 0;
+  async function worker() {
+    while (cursor < targets.length) {
+      const i = cursor++;
+      const s = targets[i];
+      const enriched = await enrichFromRss(s.feedId, s.url);
+      if (token !== enrichToken) return;        // user moved on, abandon
+      if (!enriched) continue;
+      applyEnrichment(s.feedId, enriched);
+    }
+  }
+  await Promise.all(Array.from({ length: ENRICH_CONCURRENCY }, worker));
+}
+
+function applyEnrichment(feedId, enriched) {
+  // 1. Patch the live graph node if it's in the current view.
+  const n = nodeById.get(feedId);
+  if (n) {
+    if (enriched.title) n.title = enriched.title;
+    if (enriched.image) {
+      n.image = enriched.image;
+      if (!n.data) n.data = { feedId };
+      n.data.image = enriched.image;
+    }
+    requestRender();
+  }
+  // 2. Patch any matching info-panel rec-item in place (avoids re-rendering the panel).
+  document.querySelectorAll(`#info .rec-item[data-feed="${feedId}"]`).forEach(el => {
+    if (enriched.title) {
+      const t = el.querySelector(".rec-title");
+      if (t) t.textContent = enriched.title;
+    }
+    if (enriched.image) {
+      const img = el.querySelector("img");
+      if (img) img.src = enriched.image;
+    }
+  });
+}
+
 async function enrichFromRss(feedId, rssUrl) {
   if (enrichCache.has(feedId)) return enrichCache.get(feedId);
   if (!rssUrl) { enrichCache.set(feedId, null); return null; }
@@ -920,6 +1048,8 @@ function showInfoByFeedId(feedId) {
         if (focusFeedId === feedId) document.getElementById("focus-title").textContent = enriched.title;
       }
       if (enriched.image) document.getElementById("info-cover").src = enriched.image;
+      // Also push the title/cover into the canvas node and any rec-items.
+      applyEnrichment(feedId, enriched);
     });
   }
 
@@ -930,15 +1060,33 @@ function showInfoByFeedId(feedId) {
   } else {
     outBox.innerHTML = `<div class="section-h">→ Recommends</div><div style="font-size:12px; color:var(--muted)">No recommendations.</div>`;
   }
-  const incoming = d.popularity || 0;
+  const incomingSources = recommendersByFeed.get(feedId) || [];
+  const incomingCount = d.popularity || incomingSources.length || 0;
   const inBox = document.getElementById("info-recommenders");
-  if (incoming > 0) {
-    const src = d.sourceFeedId ? byFeedId.get(d.sourceFeedId) : null;
-    const ex = src || (d.sourceFeedId ? { feedId: d.sourceFeedId, title: `Feed #${d.sourceFeedId}`, image: null, recommendedHost: d.recommenderHost, popularity: 0 } : null);
-    inBox.innerHTML = `<div class="section-h">← Recommended by ${incoming} podcast${incoming===1?"":"s"}</div>` +
-      (ex
-        ? `<div style="font-size:11px; color:var(--muted); margin-bottom:6px; font-style:italic">Dataset stores only one example recommender per podcast${incoming > 1 ? `, so the other ${incoming - 1} aren't listed.` : "."}</div><div class="rec-list">${renderRecItem(ex)}</div>`
-        : `<div style="font-size:11px; color:var(--muted); font-style:italic">Dataset doesn't store the recommender for this one.</div>`);
+  if (incomingSources.length) {
+    // Build a row for each recommender. If the recommender is also a
+    // recommended podcast in our index we get its title/image/host for free;
+    // otherwise we fall back to the minimal info shipped in the sources array.
+    const recommenderRows = incomingSources.map(s => {
+      const fromIndex = byFeedId.get(s.feedId);
+      return fromIndex || {
+        feedId: s.feedId,
+        title: `Feed #${s.feedId}`,
+        image: null,
+        popularity: 0,
+        recommendedHost: s.host
+      };
+    });
+    const missing = Math.max(0, incomingCount - incomingSources.length);
+    const caveat = missing > 0
+      ? `<div style="font-size:11px; color:var(--muted); margin-bottom:6px; font-style:italic">Showing ${incomingSources.length}; ${missing} more aren't itemized in this version of the dataset.</div>`
+      : "";
+    inBox.innerHTML =
+      `<div class="section-h">← Recommended by ${incomingCount} podcast${incomingCount===1?"":"s"}</div>` +
+      caveat +
+      `<div class="rec-list">${recommenderRows.map(renderRecItem).join("")}</div>`;
+  } else if (incomingCount > 0) {
+    inBox.innerHTML = `<div class="section-h">← Recommended by ${incomingCount} podcast${incomingCount===1?"":"s"}</div><div style="font-size:11px; color:var(--muted); font-style:italic">Dataset doesn't store the recommender list for this one.</div>`;
   } else {
     inBox.innerHTML = `<div class="section-h">← Recommended by</div><div style="font-size:12px; color:var(--muted)">No incoming recommendations.</div>`;
   }
@@ -1009,6 +1157,9 @@ document.getElementById("refresh-btn").addEventListener("click", async () => {
     allData = await loadData(false);
     buildIndexes(allData);
     await render();
+    // Deep-link: if the URL came in with #<feedId>, focus that podcast.
+    const initial = parseHashFeedId();
+    if (initial !== null) focusFeed(initial);
   } catch (e) { console.error(e); setLoader("Error: " + e.message); }
 })();
 </script>

@@ -59,26 +59,22 @@ The app uses [D3](https://d3js.org/) for three things:
 
 No D3 selection or DOM-binding is used for rendering. The graph is drawn manually to a `<canvas>`. D3 is here for its math and interaction primitives, not its rendering pipeline.
 
-## The big dataset limitation
+## Dataset structure
 
 The JSON has one row per *recommended* podcast. Each row carries:
 - The recommended podcast's metadata (title, GUID, image, host).
 - A `popularity` count of how many other podcasts recommend it.
-- A single example `sourceFeedId` of one of those recommenders.
+- A `sources` array listing **every** recommender (`feedId`, `url`, `host`) of that podcast.
+- A legacy `sourceFeedId` / `sourceFeedUrl` / `recommenderHost` triple that mirrors `sources[0]`, kept for backward compatibility.
 
-So if Huberman Lab is recommended 133 times, the dataset will say `popularity: 133` and store **one** example recommender. The other 132 are aggregated into the count but their identities are gone.
+So if Huberman Lab is recommended 133 times, the row will contain `popularity: 133` and a `sources` array of all 133 recommenders. The Atlas uses that array directly, drawing one real pink incoming arrow per recommender rather than synthetic "phantom" arrows.
 
-What this means visually:
-- **Outgoing arrows are complete.** When you focus on a podcast, every podcast it recommends is in the graph (its outgoing podroll items each appear as their own row, so we can find them all).
-- **Incoming arrows are sparse.** We can only ever draw one pink arrow per focused podcast, even when the count says 133. The graph is therefore strongly directional, with rich fan-out and almost no fan-in.
+> **Heads up about earlier versions.** Before the `sources` array was added, the dataset only stored *one* example recommender per podcast. The Atlas still falls back to phantom incoming arrows for the difference if it encounters an older cached payload (cleared on every 24h refresh, or via the "Force refresh" button). Once you reload against the current dataset, the incoming side becomes fully populated.
 
-If the dataset shipped the full edge list (all `(source, target)` pairs instead of one example per target), this visualization would suddenly become much richer:
-- Genuine clusters would emerge from force layout (since connected podcasts would actually pull together).
-- You could see who specifically recommends a popular show, not just the count.
-- "Mutual recommendations" and small influence cliques would become visible.
-- Community detection (e.g. Louvain) would actually have something to bite on.
-
-Until then, the Atlas is best read as: a popularity map of recommended podcasts, with a click-to-explore tool for each podcast's outgoing podroll.
+Practically:
+- **Outgoing arrows are complete.** Every podcast a focused show recommends is in the graph as a node.
+- **Incoming arrows are complete too** (as of the latest dataset). Each recommender is a real node, connected by a real pink arrow.
+- **Focus mode caps at 200 nodes per direction** to keep the canvas responsive for super-popular shows or aggregator accounts. The full list is always shown in the side panel.
 
 ## Running it
 
