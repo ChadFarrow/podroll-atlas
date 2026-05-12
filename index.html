@@ -114,6 +114,23 @@
   #hover-title .name { font-size: 16px; font-weight: 600; color: var(--text); line-height: 1.25; }
   #hover-title .meta { font-size: 11px; color: var(--muted); margin-top: 3px; }
 
+  /* "Loading..." pill shown top-left of the graph while RSS enrichment runs. */
+  #enrich-status {
+    position: absolute; top: 16px; left: 16px;
+    padding: 6px 12px;
+    background: rgba(255,255,255,0.92);
+    color: #0b0d12;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 600;
+    z-index: 5;
+    display: none;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.35);
+    backdrop-filter: blur(4px);
+    pointer-events: none;
+  }
+  #enrich-status .dots { display: inline-block; width: 18px; text-align: left; }
+
   /* --- Mobile layout (barely-usable fallback) --- */
   /* The app is built for desktop. Below 768px we stack the sidebar above
      the graph so at least it's navigable on a phone or small tablet. */
@@ -214,6 +231,7 @@
   <div id="stage">
     <canvas id="canvas"></canvas>
     <div id="hover-title"><div class="name" id="hover-name"></div><div class="meta" id="hover-meta"></div></div>
+    <div id="enrich-status">Loading<span class="dots">.</span></div>
     <div id="loader">
       <div class="spinner"></div>
       <div id="loader-text">Initializing…</div>
@@ -964,6 +982,26 @@ const enrichCache = new Map();
 // neighborhood is instant.
 const ENRICH_CONCURRENCY = 6;
 let enrichToken = 0;
+// Animated "Loading." → "Loading.." → "Loading..." dots while enrichment runs.
+let dotsTimer = null;
+function startLoadingDots() {
+  const el = document.getElementById("enrich-status");
+  const dots = el.querySelector(".dots");
+  el.style.display = "block";
+  let i = 1;
+  dots.textContent = ".";
+  clearInterval(dotsTimer);
+  dotsTimer = setInterval(() => {
+    i = (i % 3) + 1;
+    dots.textContent = ".".repeat(i);
+  }, 400);
+}
+function stopLoadingDots() {
+  clearInterval(dotsTimer);
+  dotsTimer = null;
+  document.getElementById("enrich-status").style.display = "none";
+}
+
 async function enrichFocusNeighborhood(feedId) {
   const token = ++enrichToken;
   const targets = [];
@@ -973,6 +1011,8 @@ async function enrichFocusNeighborhood(feedId) {
     }
   }
   // Outgoing rows already have title+image from the dataset, so no fetch needed there.
+  if (!targets.length) return;
+  startLoadingDots();
   let cursor = 0;
   async function worker() {
     while (cursor < targets.length) {
@@ -984,7 +1024,12 @@ async function enrichFocusNeighborhood(feedId) {
       applyEnrichment(s.feedId, enriched);
     }
   }
-  await Promise.all(Array.from({ length: ENRICH_CONCURRENCY }, worker));
+  try {
+    await Promise.all(Array.from({ length: ENRICH_CONCURRENCY }, worker));
+  } finally {
+    // Only hide if this is still the active enrichment run.
+    if (token === enrichToken) stopLoadingDots();
+  }
 }
 
 function applyEnrichment(feedId, enriched) {
