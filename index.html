@@ -146,12 +146,12 @@
       </div>
     </div>
 
-    <div>
-      <h2>About this app</h2>
-      <div class="legend">
+    <details>
+      <summary style="cursor:pointer; font-size:11px; text-transform:uppercase; letter-spacing:0.08em; color:var(--muted)">About this app</summary>
+      <div class="legend" style="margin-top:8px">
         This is a static web app. All the rendering, search and layout happens locally in your browser. The dataset is fetched once from <a href="https://podcastindex.org/datasets" target="_blank" rel="noopener" style="color:var(--accent-2)">podcastindex.org</a> and cached in your local machine for 24 hours. Layout and frame rate depend on your machine (see Frames per Second, FPS below): a fast laptop will fly through the node graph, while an older one will feel it. Built for desktop browsers, not optimized for mobile or touch.
       </div>
-    </div>
+    </details>
 
     <div style="margin-top:auto">
       <div style="font-size:11px; color:var(--muted); margin-bottom:8px">FPS: <span id="stat-fps" style="color:var(--text); font-variant-numeric:tabular-nums">—</span></div>

@@ -4,6 +4,8 @@ An interactive map of podcasts recommending other podcasts, mined from the Podca
 
 A single static `index.html` (no build step, no backend) running entirely in the browser.
 
+**Try it live:** [albertobeta.github.io/podroll-atlas](https://albertobeta.github.io/podroll-atlas/)
+
 > **Heads up: this is a proof of concept / prototype.** A weekend-style experiment to see what the public Podcast Index podroll dataset looks like as a navigable network. Rough edges, opinionated defaults, and missing polish are expected. Issues and pull requests welcome, but please don't treat it as a finished product.
 >
 > **Desktop only.** The interaction model assumes a mouse and a real keyboard (drag to pan, scroll wheel to zoom, hover to inspect, Esc to exit focus). It will technically open on a phone or tablet but is not optimized for touch input or small screens.
@@ -93,6 +95,12 @@ index.html              The whole app.
 recommendations.json    Optional local copy of the dataset, used as fallback.
 README.md               This file.
 ```
+
+## License
+
+Released under [**Creative Commons Attribution 4.0 (CC BY 4.0)**](https://creativecommons.org/licenses/by/4.0/). You're free to use, adapt, remix and redistribute, including commercially, as long as you credit *Alberto Betella — Podroll Atlas* and link back to this repository.
+
+See the [LICENSE](LICENSE) file for the full text.
 
 ## Credits
 
