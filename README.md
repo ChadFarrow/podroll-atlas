@@ -96,7 +96,7 @@ README.md               This file.
 
 ## Credits
 
-- Built by **Alberto Betella** ([betella.net](https://betella.net)). Full disclosure: this prototype was vibe-coded, meaning most of the implementation was produced through a back-and-forth conversation with an AI coding assistant rather than typed from scratch. The product direction, dataset framing, design decisions and review are mine; the keystrokes are largely the model's.
+- Built by [**Alberto Betella**](https://betella.net). Disclosure: coded with heavy AI assistance. Architecture, design and decisions mine, most of the code AI-generated.
 - Data: [Podcast Index](https://podcastindex.org/) and every podcaster who wrote a `<podcast:podroll>` tag.
 - The `<podcast:podroll>` tag itself: [Podcasting 2.0 namespace](https://github.com/Podcastindex-org/podcast-namespace).
 - Visualization library: [D3.js](https://d3js.org/).
