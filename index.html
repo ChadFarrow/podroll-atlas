@@ -117,8 +117,22 @@
   /* --- Mobile layout (barely-usable fallback) --- */
   /* The app is built for desktop. Below 768px we stack the sidebar above
      the graph so at least it's navigable on a phone or small tablet. */
+  /* Yellow "works best on desktop" notice — hidden on desktop, visible on mobile only. */
+  #mobile-notice { display: none; }
+
   @media (max-width: 768px) {
     #app { flex-direction: column; }
+    #mobile-notice {
+      display: block;
+      width: 100%;
+      background: #fbbf24;
+      color: #0b0d12;
+      text-align: center;
+      padding: 6px 12px;
+      font-size: 12px;
+      font-weight: 600;
+      flex-shrink: 0;
+    }
     #sidebar {
       width: 100%; max-height: 23vh;
       border-right: none; border-bottom: 1px solid var(--border);
@@ -135,6 +149,7 @@
 </head>
 <body>
 <div id="app">
+  <div id="mobile-notice">⚠ Works best on desktop</div>
   <aside id="sidebar">
     <div>
       <h1>Podroll Atlas</h1>

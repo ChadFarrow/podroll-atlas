@@ -76,6 +76,21 @@ Practically:
 - **Incoming arrows are complete too** (as of the latest dataset). Each recommender is a real node, connected by a real pink arrow.
 - **Focus mode caps at 200 nodes per direction** to keep the canvas responsive for super-popular shows or aggregator accounts. The full list is always shown in the side panel.
 
+## RSS enrichment for source-only podcasts
+
+A meaningful chunk of podcasts in the dataset appear only as *recommenders* (sources), never as recommended podcasts. For these, the JSON gives us their `feedId`, `url`, and `host` but no title or cover art. They'd otherwise render as anonymous "Feed #123456" dots with a default cover.
+
+When you enter focus mode and any neighbor (or the focused podcast itself) is one of these source-only feeds, the Atlas:
+
+1. Fetches each unknown podcast's RSS feed in the background (up to 6 in parallel).
+2. Parses the channel `<title>` and `<itunes:image>` out of the XML.
+3. Patches the title text under the graph node, swaps in the real cover art, and updates the matching row in the right-hand info panel.
+4. Caches the result for the session, so re-focusing on the same neighborhood is instant.
+
+**CORS fallback.** Many podcast hosts (especially smaller ones, self-hosted feeds, and some big platforms) don't send the `Access-Control-Allow-Origin` header on their RSS endpoint. Those fetches fail with a CORS error before the browser even shows the body to JavaScript. The Atlas handles this gracefully: the failure is logged once, the miss is cached so we don't retry, and the node stays as a placeholder with the default cover. No retry loop, no broken state, no user-visible error. The graph degrades smoothly.
+
+In practice, hosts that tend to cooperate (RSS.com, Buzzsprout, Spreaker, parts of Anchor/Spotify, Megaphone, Captivate, Transistor, etc.) enrich successfully. The rest stay as anonymous nodes.
+
 ## Running it
 
 Open `index.html` in a browser. That is the entire instruction.
@@ -94,7 +109,7 @@ README.md               This file.
 
 ## License
 
-Released under [**Creative Commons Attribution 4.0 (CC BY 4.0)**](https://creativecommons.org/licenses/by/4.0/). You're free to use, adapt, remix and redistribute, including commercially, as long as you credit *Alberto Betella — Podroll Atlas* and link back to this repository.
+Released under [**Creative Commons Attribution 4.0 (CC BY 4.0)**](https://creativecommons.org/licenses/by/4.0/). You're free to use, adapt, remix and redistribute, including commercially, as long as you give appropriate credit and link back to this repository.
 
 See the [LICENSE](LICENSE) file for the full text.
 
